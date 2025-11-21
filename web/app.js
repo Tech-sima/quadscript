@@ -1,7 +1,4 @@
-// Supabase config (замените на свои ключи)
-const SUPABASE_URL = 'https://vdjmswyditqsnbohoqqi.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3Cp1fc32fKnTDuNN5vGcXnSSehgS2qhkbFqbURhC8V5fBKmoxvduX91Bak9dUS2qhkbFqbURhC8V5fBjpxQzc26CxTtPFuQMNfm2RfEHfKHfKXWTADCpgQUxX0.mvzAhZ7lJCdVFpBijaTEz-KKEBSnOLY9EtknSMaB15I';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Теперь все действия идут через backend /api/bots
 
 const botListInput = document.getElementById('botListInput');
 const saveBotsBtn = document.getElementById('saveBots');
@@ -14,29 +11,41 @@ if (!userId) {
   localStorage.setItem('userId', userId);
 }
 
-// Сохранить список ботов
+// Сохранить список ботов через backend
 saveBotsBtn.onclick = async function() {
   const bots = botListInput.value.split('\n').map(b => b.trim()).filter(b => b);
-  for (const bot of bots) {
-    await supabase.from('bots').upsert({ name: bot, status: 'free', loaded_by: null });
-  }
+  if (bots.length === 0) return;
+  await fetch('/api/bots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bots })
+  });
+  alert('Список сохранён!');
+};
+// Проверить статусы введённых ботов через backend
+const checkBotsBtn = document.getElementById('checkBots');
+checkBotsBtn.onclick = async function() {
+  const bots = botListInput.value.split('\n').map(b => b.trim()).filter(b => b);
+  if (bots.length === 0) return;
+  const res = await fetch('/api/bots');
+  const allBots = await res.json();
+  const filtered = allBots.filter(b => bots.includes(b.name));
+  renderBots(filtered);
+};
+// Показать только "мои боты" (занятые текущим пользователем)
+const myBotsBtn = document.getElementById('myBots');
+myBotsBtn.onclick = async function() {
+  const res = await fetch('/api/bots');
+  const allBots = await res.json();
+  const mine = allBots.filter(b => b.loaded_by === userId);
+  renderBots(mine);
 };
 
-// Слушать изменения статусов ботов через Supabase Realtime
-async function listenBots() {
-  const { data, error } = await supabase.from('bots').select('*');
-  renderBots(data || []);
-
-  supabase.channel('bots-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'bots' }, payload => {
-      fetchAndRenderBots();
-    })
-    .subscribe();
-}
-
+// Получить и отобразить всех ботов
 async function fetchAndRenderBots() {
-  const { data, error } = await supabase.from('bots').select('*');
-  renderBots(data || []);
+  const res = await fetch('/api/bots');
+  const bots = await res.json();
+  renderBots(bots);
 }
 
 function renderBots(bots) {
@@ -55,11 +64,16 @@ function renderBots(bots) {
     li.appendChild(statusSpan);
     li.onclick = async () => {
       if (!info.loaded_by || info.loaded_by === userId) {
-        await supabase.from('bots').update({ status: 'busy', loaded_by: userId }).eq('name', info.name);
+        await fetch('/api/bots', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: info.name, status: 'busy', loaded_by: userId })
+        });
+        fetchAndRenderBots();
       }
     };
     botStatusList.appendChild(li);
   });
 }
 
-listenBots();
+fetchAndRenderBots();
